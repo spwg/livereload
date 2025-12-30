@@ -28,12 +28,6 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	// 3. Prepare to run the livereload tool
-	// We'll run the actual main.go from the current directory
-	// Build the livereload binary first to ensure we test the built artifact
-
-	// Actually, it's cleaner to run livereload IN the temp dir, so relative paths work.
-	// But main.go is in the parent dir.
-	// Let's build livereload binary first.
 	livereloadBin := filepath.Join(tempDir, "livereload_bin")
 	buildCmd := exec.Command("go", "build", "-o", livereloadBin, "..")
 	if err := buildCmd.Run(); err != nil {
@@ -70,7 +64,6 @@ func TestEndToEnd(t *testing.T) {
 			n, _ := stdoutPipe.Read(buf)
 			if n > 0 {
 				output := string(buf[:n])
-				// fmt.Printf("TEST OUTPUT: %s", output) // Debug access
 				if strings.Contains(output, expected) {
 					return nil
 				}
@@ -88,7 +81,6 @@ func TestEndToEnd(t *testing.T) {
 
 	// 5. Modify file to Version 2
 	t.Log("Modifying file to Version 2...")
-	// Wait a bit to ensure mtime is different and debounce passes
 	time.Sleep(1 * time.Second)
 	if err := writeMainFile(mainFile, "Hello Version 2"); err != nil {
 		t.Fatalf("Failed to update main.go: %v", err)
@@ -98,6 +90,78 @@ func TestEndToEnd(t *testing.T) {
 	t.Log("Waiting for Version 2...")
 	if err := waitForOutput("Hello Version 2", 10*time.Second); err != nil {
 		t.Fatalf("Failed to see Version 2: %v", err)
+	}
+}
+
+func TestTOMLConfig(t *testing.T) {
+	// 1. Setup temporary directory
+	tempDir, err := os.MkdirTemp("", "livereload_toml_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// 2. Create a dummy "app" in the temp dir
+	mainFile := filepath.Join(tempDir, "main.go")
+	if err := writeMainFile(mainFile, "Hello TOML"); err != nil {
+		t.Fatalf("Failed to create main.go: %v", err)
+	}
+
+	// 3. Create livereload.toml
+	tomlContent := `
+build = "go build -o app_toml main.go"
+run = "./app_toml"
+watch = ["."]
+ignore = [".git"]
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "livereload.toml"), []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("Failed to create livereload.toml: %v", err)
+	}
+
+	// 4. Build livereload binary
+	livereloadBin := filepath.Join(tempDir, "livereload_bin")
+	buildCmd := exec.Command("go", "build", "-o", livereloadBin, "..")
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("Failed to build livereload: %v", err)
+	}
+
+	// 5. Run livereload WITHOUT arguments
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, livereloadBin)
+	cmd.Dir = tempDir
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("Failed to get stdout pipe: %v", err)
+	}
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Failed to start livereload: %v", err)
+	}
+
+	// Helper to scan for expected output
+	waitForOutput := func(expected string, timeout time.Duration) error {
+		deadline := time.Now().Add(timeout)
+		buf := make([]byte, 1024)
+		for time.Now().Before(deadline) {
+			n, _ := stdoutPipe.Read(buf)
+			if n > 0 {
+				output := string(buf[:n])
+				if strings.Contains(output, expected) {
+					return nil
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		return fmt.Errorf("timeout waiting for %q", expected)
+	}
+
+	t.Log("Waiting for Hello TOML...")
+	if err := waitForOutput("Hello TOML", 10*time.Second); err != nil {
+		t.Fatalf("Failed to see Hello TOML: %v", err)
 	}
 }
 
