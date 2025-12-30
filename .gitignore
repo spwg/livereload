@@ -33,3 +33,5 @@ go.work.sum
 
 /main
 /livereload
+# Added by goreleaser init:
+dist/
