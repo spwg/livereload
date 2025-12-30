@@ -1,0 +1,5 @@
+run = "./app"
+build = "go build -o app main.go"
+watch = ["."]
+ignore = [".git", "app"]
+health_url = "http://localhost:8080"

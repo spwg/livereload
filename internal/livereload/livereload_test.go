@@ -86,7 +86,9 @@ func TestLivereload_Unit(t *testing.T) {
 		RunCmd:       "./app",
 		IgnoreMap:    make(map[string]bool),
 		DebounceTime: 10 * time.Millisecond, // Short debounce for test
+		RestartDelay: 10 * time.Millisecond,
 		Log:          log.New(io.Discard, "", 0),
+		Hub:          NewReloadHub(),
 	}
 
 	// run app.Run() in a goroutine because it blocks

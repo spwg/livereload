@@ -3,6 +3,7 @@ package livereload
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,28 +81,76 @@ func (p *RealProcess) Wait() error {
 
 // Livereload logic struct
 type Livereload struct {
-	Watcher      FileWatcher
-	Runner       CommandRunner
-	BuildCmd     string
-	RunCmd       string
-	IgnoreMap    map[string]bool
-	DebounceTime time.Duration
-	Log          *log.Logger
+	Watcher        FileWatcher
+	Runner         CommandRunner
+	BuildCmd       string
+	RunCmd         string
+	IgnoreMap      map[string]bool
+	DebounceTime   time.Duration
+	RestartDelay   time.Duration
+	Log            *log.Logger
+	ReloadPort     int
+	ReloadHost     string
+	Hub            *ReloadHub
+	LivereloadJS   []byte
+	HealthURL      string
+	HealthTimeout  time.Duration
+	HealthInterval time.Duration
 }
 
-func NewLivereload(buildCmd, runCmd string, ignoreMap map[string]bool, watcher FileWatcher) *Livereload {
+func NewLivereload(buildCmd, runCmd string, ignoreMap map[string]bool, watcher FileWatcher, reloadPort int, reloadHost string, livereloadJS []byte) *Livereload {
 	return &Livereload{
-		Watcher:      watcher,
-		Runner:       &RealCommandRunner{},
-		BuildCmd:     buildCmd,
-		RunCmd:       runCmd,
-		IgnoreMap:    ignoreMap,
-		DebounceTime: 100 * time.Millisecond,
-		Log:          log.New(os.Stdout, "", log.LstdFlags),
+		Watcher:        watcher,
+		Runner:         &RealCommandRunner{},
+		BuildCmd:       buildCmd,
+		RunCmd:         runCmd,
+		IgnoreMap:      ignoreMap,
+		DebounceTime:   100 * time.Millisecond,
+		RestartDelay:   100 * time.Millisecond,
+		Log:            log.New(os.Stdout, "", log.LstdFlags),
+		ReloadPort:     reloadPort,
+		ReloadHost:     reloadHost,
+		Hub:            NewReloadHub(),
+		LivereloadJS:   livereloadJS,
+		HealthURL:      "",
+		HealthTimeout:  5 * time.Second,
+		HealthInterval: 50 * time.Millisecond,
 	}
 }
 
+// waitForHealth polls the HealthURL until it returns 200 OK or times out.
+// Returns nil if health check passes, error if it times out.
+func (app *Livereload) waitForHealth() error {
+	if app.HealthURL == "" {
+		// No health URL configured, fall back to delay
+		if app.RestartDelay > 0 {
+			time.Sleep(app.RestartDelay)
+		}
+		return nil
+	}
+
+	deadline := time.Now().Add(app.HealthTimeout)
+	client := &http.Client{Timeout: app.HealthInterval}
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(app.HealthURL)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				return nil
+			}
+		}
+		time.Sleep(app.HealthInterval)
+	}
+
+	app.Log.Printf("Warning: Health check timed out after %v", app.HealthTimeout)
+	return nil // Still proceed with reload even if health check fails
+}
+
 func (app *Livereload) Run() error {
+	// Start the reload server
+	app.StartServer()
+
 	// Channel to signal a rebuild/restart is needed
 	restartCh := make(chan bool, 1)
 
@@ -114,6 +163,10 @@ func (app *Livereload) Run() error {
 			case event, ok := <-app.Watcher.Events():
 				if !ok {
 					return
+				}
+				// Skip ignored files
+				if app.IgnoreMap[filepath.Base(event.Name)] {
+					continue
 				}
 				if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create || event.Op&fsnotify.Remove == fsnotify.Remove {
 					if debounceTimer != nil {
@@ -172,6 +225,15 @@ func (app *Livereload) Run() error {
 			continue
 		}
 		currentProcess = p
+
+		// Wait for the server to be ready
+		if err := app.waitForHealth(); err != nil {
+			fmt.Printf(">> Health check failed: %v\n", err)
+			continue
+		}
+
+		// Notify clients to reload after the server has restarted
+		app.Hub.broadcast <- []byte("reload")
 
 		// Wait for process in a goroutine so we don't block the loop
 		// We don't necessarily need to Wait() here for the loop logic since we handle headers in the restart
