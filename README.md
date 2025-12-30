@@ -18,14 +18,46 @@ The tool uses `fsnotify` to listen for file system events (create, write, remove
 -   **OS**: macOS, Linux, or other Unix-like systems.
     -   *Note*: The current implementation uses process signaling that is optimized for Unix-based systems. Windows support is experimental or may require adjustments to process killing logic.
 -   **Go**: Go 1.20+ (to build the tool itself).
+-   **Testing**: Primarily tested on Apple Silicon (ARM64) Macs.
 
 ## Installation
 
-Clone the repository and build the tool:
+There are several ways to install the `livereload` CLI tool:
+
+### 1. Using `go install` (Recommended for Go users)
+
+If you have Go (1.21 or newer) installed, you can install the `livereload` tool directly using `go install`:
 
 ```bash
-go build -o livereload main.go
+go install github.com/spwg/livereload@latest
 ```
+
+This will download, compile, and install the `livereload` executable into your `$GOPATH/bin` directory (or `$HOME/go/bin` if `$GOPATH` is not set). Ensure this directory is in your system's `PATH` to run `livereload` from anywhere.
+
+### 2. Downloading from GitHub Releases
+
+You can download pre-compiled binaries for your operating system directly from the [GitHub Releases page](https://github.com/spwg/livereload/releases).
+
+1.  Go to the [GitHub Releases page](https://github.com/spwg/livereload/releases).
+2.  Find the latest release.
+3.  Download the archive (`.tar.gz` for Linux/macOS or `.zip` for Windows) that matches your operating system and architecture.
+4.  Extract the archive.
+5.  Move the `livereload` executable to a directory included in your system's `PATH` (e.g., `/usr/local/bin` on Linux/macOS, or any directory in your `Path` environment variable on Windows).
+
+### 3. Building from Source
+
+If you prefer to build from source, or if you want to contribute to the project:
+
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/spwg/livereload.git
+    cd livereload
+    ```
+2.  Build the tool:
+    ```bash
+    go build -o livereload main.go
+    ```
+3.  The `livereload` executable will be created in the current directory. You can then move it to a directory in your `PATH` if desired.
 
 ## Usage
 
